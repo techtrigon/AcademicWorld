@@ -17,8 +17,8 @@ Empowered Admins with CRUD operations on all academic details, leveraging Depend
 
 2- Go to db_connection.py and setup the database connection for configuration ⬇️
 
-////CHANGE BASED ON UR SETUP
-=
+-----CHANGE BASED ON UR SETUP
+
 server_name = "postgres"
 server_password = "1"
 host_address = "localhost"
@@ -27,7 +27,7 @@ database_name = "academicworld"
 
 3- In main.py ⬇️ & RUN main.py
 
-////CHANGE BASED ON UR SETUP
+-----CHANGE BASED ON UR SETUP
 uvicorn.run(app="main:app", host="localhost", port=8080, reload=True)
 
 4- Go to localhost:8080/schema/
