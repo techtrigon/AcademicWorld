@@ -19,7 +19,7 @@ Empowered Admins with CRUD operations on all academic details, leveraging Depend
 
 ////CHANGE BASED ON UR SETUP
 
-server_name = "postgres" \r
+server_name = "postgres"
 server_password = "1"
 host_address = "localhost"
 port = "5432"
