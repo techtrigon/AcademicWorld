@@ -1,24 +1,25 @@
 import enum
-from pydantic.dataclasses import dataclass
-from pydantic import Field, StrictFloat, StrictInt, StrictStr, PositiveInt
+from dataclasses import dataclass
 
 
 # --------------------------------------------------->         USER
 @dataclass(slots=True)
 class User:
-    name: StrictStr
-    username: StrictStr
-    email: StrictStr
-    pwd: StrictStr
-    cpwd: StrictStr
-    # admin: StrictBool
+    name: str
+    username: str
+    email: str
+    pwd: str
+    cpwd: str
+
+    def __post_init__(self):
+        self.name = self.name.title()
 
 
 @dataclass(slots=True)
 class UserLogin:
-    emailname: StrictStr = Field(description="Username/Email")
-    pwd: StrictStr = Field()
-    cpwd: StrictStr = Field()
+    emailname: str
+    pwd: str
+    cpwd: str
 
 
 # --------------------------------------------------->         COURSE
@@ -32,48 +33,51 @@ class course_type(enum.Enum):
 
 @dataclass(slots=True)
 class Course:
-    name: StrictStr
-    duration: PositiveInt
+    name: str
+    duration: int
     type: course_type
-    elig: StrictStr
+    elig: str
 
 
 # --------------------------------------------------->         COLLEGE
 @dataclass(slots=True)
 class College:
-    name: StrictStr
-    rank: PositiveInt
-    email: StrictStr
-    city: StrictStr
-    state: StrictStr
-    country: StrictStr
-    address: StrictStr
+    name: str
+    rank: int
+    email: str
+    city: str
+    state: str
+    country: str
+    address: str
+
+    def __post_init__(self):
+        self.name = self.name.title()
 
 
 # --------------------------------------------------->         EXAM
 @dataclass(slots=True)
 class Exam:
-    name: StrictStr
-    elig: StrictStr
-    syllabus: StrictStr
-    fee: StrictFloat
+    name: str
+    elig: str
+    syllabus: str
+    fee: float
 
 
 # --------------------------------------------------->         ACADEMICS
 @dataclass(slots=True)
 class Academics:
-    course_id: StrictInt
-    college_id: StrictInt
-    exam_id: StrictInt
-    course_fee: StrictFloat
-    cutoff_rank: StrictInt
+    course_id: int
+    college_id: int
+    exam_id: int
+    course_fee: float
+    cutoff_rank: int
 
 
 # --------------------------------------------------->         POST
 @dataclass(slots=True)
 class Post:
-    title: StrictStr
-    body: StrictStr
+    title: str
+    body: str
 
 
 class view(enum.Enum):
@@ -84,5 +88,5 @@ class view(enum.Enum):
 # --------------------------------------------------->         LIST
 @dataclass(slots=True)
 class List:
-    course_id: StrictInt
+    course_id: int
     view: view

@@ -1,4 +1,5 @@
-import msgspec
+from pydantic import validate_email
+from pydantic_core import PydanticCustomError
 from db_connenction import db_connection, provide_transaction
 from sqlalchemy.ext.asyncio import AsyncSession
 import models as md, models_validation as mv  # noqa: E401
@@ -17,42 +18,25 @@ from typing import Annotated, Any, Optional
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemySerializationPlugin
 from sqlalchemy import desc, select, insert, update
 from litestar.openapi import OpenAPIConfig
-from litestar.params import Parameter
-from litestar.security.jwt import JWTCookieAuth, Token
-from litestar.connection import ASGIConnection
-from litestar.exceptions import NotAuthorizedException
+from litestar.params import Parameter, Body
+from litestar.exceptions import (
+    NotAuthorizedException,
+    ValidationException,
+    NotFoundException,
+)
 from litestar.handlers import BaseRouteHandler
 from litestar.di import Provide
 from sqlalchemy.exc import NoResultFound, IntegrityError
 from litestar.config.response_cache import CACHE_FOREVER
 from passlib.hash import pbkdf2_sha256 as securepwd
-from sqlalchemy import text
-
-SECRET = "jhsdfitw76TY62TGD2tr65rF5d45565rfgF65RG765rtr65r645RD"
-
-
-async def retrieve_user_handler(
-    token: Token, connection: "ASGIConnection[Any, Any, Any, Any]"
-) -> dict:
-    return {"user_id": token.sub, "admin": token.extras.get("admin")}
-
-
-jwt_cookie_auth = JWTCookieAuth(
-    token_secret=SECRET,
-    retrieve_user_handler=retrieve_user_handler,
-    exclude_opt_key="exclude_from_auth",
-    exclude=[
-        "/login",
-        "/schema",
-    ],
-)
+from jwt_authentication import jwt_cookie_auth
 
 
 # -----------------------------------------------------------------------------> GUARD
 async def check_admin(request: Request, handler: BaseRouteHandler) -> Any:
     # print(request.user)
     if not request.user.get("admin"):
-        raise NotAuthorizedException("NOT ALLOWED")
+        raise NotAuthorizedException("⚠️ NOT ALLOWED")
 
 
 # ..........................................................................................     USER CONTROLLER 🔰
@@ -63,22 +47,29 @@ class usercontroller(Controller):
     tags = ["🟡   Users"]
 
     async def check_user(user_id: str, request: Request) -> str:
-        print("ENTERED")
-        if not request.user.get("admin") and request.user["user_id"] != user_id:
+        # print("ENTERED")
+        if request.user["user_id"] and not request.user.get("admin"):
             raise NotAuthorizedException("⚠️ NOT ALLOWED !!")
         return user_id
 
     dependencies = {"check_user_dep1": Provide(check_user, True)}
 
     @post("/login", media_type=MediaType.TEXT)
-    async def login(self, data: mv.UserLogin, db: AsyncSession) -> str:
+    async def login(
+        self, request: Request, data: mv.UserLogin, db: AsyncSession
+    ) -> str:
+        if data.pwd != data.cpwd:
+            raise ValidationException("⚠️ Passwords don't match")
         userid = data.emailname
+
         stmt = select(md.User).where(
             (md.User.email == userid) | (md.User.username == userid)
         )
         res = await db.scalar(stmt)
         if res is None:
-            return "⚠️ NO USER FOUND !!"
+            raise NotFoundException("⚠️ NO USER FOUND !!")
+        if not request.user.get("admin") and securepwd.verify(data.pwd, res.pwd):
+            raise ValidationException("⚠️ Incorrect Password !!")
         return jwt_cookie_auth.login(
             response_media_type=MediaType.TEXT,
             response_body="✅ LOGGED IN AS ADMIN"
@@ -99,10 +90,16 @@ class usercontroller(Controller):
         res = await db.scalars(select(md.User))
         return res._allrows()
 
-    @post("/register", exclude_from_auth=True)
+    @post("/register", exclude_from_auth=True, media_type=MediaType.TEXT)
     async def register(
         self, data: mv.User, db: AsyncSession, request: Request
     ) -> str | Response:
+        try:
+            validate_email(data.email)
+        except PydanticCustomError:
+            raise ValidationException("⚠️ Invalid Email")
+        if data.pwd != data.cpwd:
+            raise ValidationException("⚠️ Passwords don't match")
         stmt = insert(md.User).values(
             name=data.name,
             username=data.username,
@@ -110,24 +107,27 @@ class usercontroller(Controller):
             pwd=securepwd.hash(data.pwd),
         )
         try:
-            await db.scalar(stmt)
-        except Exception:
-            return Response("⚠️ USER ALREADY EXISTS !!", status_code=400)
+            await db.execute(stmt)
+        except IntegrityError:
+            raise Response("⚠️ USER ALREADY EXISTS !!", status_code=400)
         return "✅ USER ADDED SUCCESSFULLY !!"
 
     @delete("/delete/{user_id:str}", status_code=200)
     async def user_delete(
         self,
         db: AsyncSession,
-        check_user_dep1: str = Parameter(description="Username/Email to delete"),
+        check_user_dep1: Annotated[
+            Any, Parameter(description="Username/Email to delete")
+        ],
     ) -> str:
         user_id = check_user_dep1
+        # print(user_id)
         stmt = select(md.User).where(
             (md.User.email == user_id) | (md.User.username == user_id)
         )
         res = await db.scalar(stmt)
         if res is None:
-            return "⚠️ NO USER FOUND !!"
+            raise NotFoundException("⚠️ NO USER FOUND !!")
         await db.delete(res)
         return "✅ DELETED USER SUCCESSFULLY !!"
 
@@ -149,6 +149,12 @@ class coursecontroller(Controller):
 
     @post("/add", guards=[check_admin], media_type=MediaType.TEXT)
     async def course_add(self, data: mv.Course, db: AsyncSession) -> Any:
+        try:
+            data.duration = int(data.duration)
+        except ValueError:
+            raise ValidationException("⚠️ Duration can only be integer")
+        if data.duration < 1:
+            raise ValidationException("⚠️ Duration can't be less than than 1")
         stmt = insert(md.Course).values(
             name=data.name,
             duration=data.duration,
@@ -156,7 +162,7 @@ class coursecontroller(Controller):
             elig=data.elig,
         )
         try:
-            await db.scalar(stmt)
+            await db.execute(stmt)
         except Exception:
             return Response("⚠️ COURSE ALREADY EXISTS !!", status_code=400)
         return "✅ ADDED SUCCESSFULLY !!"
@@ -166,8 +172,9 @@ class coursecontroller(Controller):
         self,
         course_id: int,
         db: AsyncSession,
-        data: dict = Parameter(
-            description='DEMO SCHEMA  =  { "name": " " , "duration": 0 , "type": " " , "elig": " " }'
+        data: dict = Body(
+            title="Course",
+            description='DEMO SCHEMA  =  { "name": " " , "duration": 0 , "type": " " , "elig": " " }',
         ),
     ) -> Any:
         stmt = update(md.Course).where(md.Course.id == course_id).values(**data)
@@ -257,7 +264,7 @@ class coursecontroller(Controller):
         stmt = select(md.CoursePost).where(md.CoursePost.id == post_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO POST FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO POST FOUND !!")
         await db.delete(res)
         return "✅ DELETED POST SUCCESSFULLY !!"
 
@@ -297,7 +304,7 @@ class coursecontroller(Controller):
         try:
             await db.get_one(md.Course, data.course_id)
         except NoResultFound:
-            return Response("⚠️ NO COURSE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COURSE FOUND !!")
         user_id = request.user.get("user_id")
         stmt = insert(md.CourseList).values(
             user_id=user_id, course_id=data.course_id, view=data.view.value
@@ -327,7 +334,7 @@ class coursecontroller(Controller):
         )
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO LIST ENTRY FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO LIST ENTRY FOUND !!")
         await db.delete(res)
         return "✅ DELETED LIST ENTRY SUCCESSFULLY !!"
 
@@ -339,14 +346,14 @@ class coursecontroller(Controller):
         try:
             await db.get_one(md.Course, course_id)
         except NoResultFound:
-            return Response("⚠️ NO COURSE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COURSE FOUND !!")
         user_id = request.user.get("user_id")
         try:
             await db.scalar(
                 insert(md.CourseLikes).values(user_id=user_id, course_id=course_id)
             )
         except IntegrityError:
-            return Response("⚠️ YOU ALREADY LIKED !!", status_code=400)
+            return Response("⚠️ ALREADY LIKED !!", status_code=400)
         stmt = (
             update(md.Course)
             .where(md.Course.id == course_id)
@@ -375,7 +382,17 @@ class collegecontroller(Controller):
         return res._allrows()
 
     @post("/add", guards=[check_admin], media_type=MediaType.TEXT)
-    async def college_add(self, data: mv.College, db: AsyncSession) -> Any:
+    async def college_add(
+        self,
+        db: AsyncSession,
+        data: mv.College = Body(title="College", default=1, examples=[1]),
+    ) -> Any:
+        try:
+            data.rank = int(data.rank)
+        except ValueError:
+            raise ValidationException("⚠️ Rank can only be integer")
+        if data.rank < 1:
+            raise ValidationException("⚠️ Rank can't be less than than 1")
         stmt = insert(md.College).values(
             name=data.name,
             rank=data.rank,
@@ -416,7 +433,7 @@ class collegecontroller(Controller):
         stmt = select(md.College).where(md.College.id == college_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO COLLEGE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COLLEGE FOUND !!")
         await db.delete(res)
         return "✅ DELETED COLLEGE SUCCESSFULLY !!"
 
@@ -485,7 +502,7 @@ class collegecontroller(Controller):
         stmt = select(md.CollegePost).where(md.CollegePost.id == post_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO POST FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO POST FOUND !!")
         await db.delete(res)
         return "✅ DELETED POST SUCCESSFULLY !!"
 
@@ -524,7 +541,7 @@ class collegecontroller(Controller):
         try:
             await db.get_one(md.College, data.course_id)
         except NoResultFound:
-            return Response("⚠️ NO COLLEGE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COLLEGE FOUND !!")
         user_id = request.user.get("user_id")
         stmt = insert(md.CollegeList).values(
             user_id=user_id, college_id=data.course_id, view=data.view.value
@@ -545,7 +562,7 @@ class collegecontroller(Controller):
         try:
             await db.get_one(md.College, college_id)
         except NoResultFound:
-            return Response("⚠️ NO COURSE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COLLEGE FOUND !!")
         user_id = request.user.get("user_id")
         stmt = (
             select(md.CollegeList)
@@ -554,7 +571,7 @@ class collegecontroller(Controller):
         )
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO LIST ENTRY FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO LIST ENTRY FOUND !!")
         await db.delete(res)
         return "✅ DELETED LIST ENTRY SUCCESSFULLY !!"
 
@@ -566,14 +583,14 @@ class collegecontroller(Controller):
         try:
             await db.get_one(md.College, college_id)
         except NoResultFound:
-            return Response("⚠️ NO COLLEGE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO COLLEGE FOUND !!")
         user_id = request.user.get("user_id")
         try:
             await db.scalar(
                 insert(md.CollegeLikes).values(user_id=user_id, college_id=college_id)
             )
         except IntegrityError:
-            return Response("⚠️ YOU ALREADY LIKED !!", status_code=400)
+            return Response("⚠️ ALREADY LIKED !!", status_code=400)
         stmt = (
             update(md.College)
             .where(md.College.id == college_id)
@@ -638,7 +655,7 @@ class examcontroller(Controller):
         stmt = select(md.Exam).where(md.Exam.id == exam_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO EXAM FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO EXAM FOUND !!")
         await db.delete(res)
         return "✅ DELETED SUCCESSFULLY !!"
 
@@ -705,7 +722,7 @@ class examcontroller(Controller):
         stmt = select(md.ExamPost).where(md.ExamPost.id == post_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO POST FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO POST FOUND !!")
         await db.delete(res)
         return "✅ DELETED POST SUCCESSFULLY !!"
 
@@ -742,7 +759,7 @@ class examcontroller(Controller):
         try:
             await db.get_one(md.Exam, data.course_id)
         except NoResultFound:
-            return Response("⚠️ NO COLLEGE FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO EXAM FOUND !!")
         user_id = request.user.get("user_id")
         stmt = insert(md.ExamList).values(
             user_id=user_id, exam_id=data.course_id, view=data.view.value
@@ -763,7 +780,7 @@ class examcontroller(Controller):
         try:
             await db.get_one(md.Exam, exam_id)
         except NoResultFound:
-            return Response("⚠️ NO EXAM FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO EXAM FOUND !!")
         user_id = request.user.get("user_id")
         stmt = (
             select(md.ExamList)
@@ -772,7 +789,7 @@ class examcontroller(Controller):
         )
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO LIST ENTRY FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO LIST ENTRY FOUND !!")
         await db.delete(res)
         return "✅ DELETED LIST ENTRY SUCCESSFULLY !!"
 
@@ -784,14 +801,14 @@ class examcontroller(Controller):
         try:
             await db.get_one(md.Exam, exam_id)
         except NoResultFound:
-            return Response("⚠️ NO EXAM FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO EXAM FOUND !!")
         user_id = request.user.get("user_id")
         try:
             await db.scalar(
                 insert(md.ExamLikes).values(user_id=user_id, exam_id=exam_id)
             )
         except IntegrityError:
-            return Response("⚠️ YOU ALREADY LIKED !!", status_code=400)
+            return Response("⚠️ ALREADY LIKED !!", status_code=400)
         stmt = (
             update(md.Exam).where(md.Exam.id == exam_id).values(likes=md.Exam.likes + 1)
         )
@@ -838,7 +855,7 @@ class academicscontroller(Controller):
         stmt = select(md.Academics).where(md.Academics.id == academics_id)
         res = await db.scalar(stmt)
         if res is None:
-            return Response("⚠️ NO ACADEMICS FOUND !!", status_code=404)
+            raise NotFoundException("⚠️ NO ACADEMICS FOUND !!")
         await db.delete(res)
         return "✅ DELETED SUCCESSFULLY !!"
 
@@ -898,18 +915,22 @@ class academicscontroller(Controller):
         )
         res = await db.execute(stmt)
         ans = res.mappings()
-        ans = [msgspec.convert(i, dict) for i in ans]
+        ans = [dict(i) for i in ans]
         return ans
 
-    @get("/academics-from-ex", exclude_from_auth=True, cache=CACHE_FOREVER)
-    async def AcademicsFromExa(
-        self,
-        db: AsyncSession,
-        exam_id: int = Parameter(
-            description="Get all College & Courses accepting this Exam"
-        ),
-    ) -> list[dict]:
-        pass
+
+# -----------------------------------------------------------------------------> EXCEPTION HANDLER
+def exception_handler(_: Request, exc: Exception) -> Response:
+    status_code = getattr(exc, "status_code", 500)
+    detail = getattr(exc, "detail", "⚠️ SOME ERROR OCCURED")
+    return Response(
+        media_type=MediaType.TEXT,
+        content=detail,
+        status_code=status_code,
+    )
+
+
+# -----------------------------------------------------------------------------> MAIN APP
 
 
 app = Litestar(
@@ -925,6 +946,11 @@ app = Litestar(
     plugins=[SQLAlchemySerializationPlugin()],
     on_app_init=[jwt_cookie_auth.on_app_init],
     debug=True,
+    exception_handlers={
+        ValidationException: exception_handler,
+        NotAuthorizedException: exception_handler,
+        NotFoundException: exception_handler,
+    },
     openapi_config=OpenAPIConfig(
         title="AcademicWorld", version="", root_schema_site="rapidoc"
     ),

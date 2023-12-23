@@ -17,7 +17,7 @@ async def db_connection(app: Litestar) -> Any:
     )
     app.state.engine = engine
     async with engine.begin() as conn:
-        await conn.run_sync(md.Base.metadata.drop_all)
+        # await conn.run_sync(md.Base.metadata.drop_all)
         await conn.run_sync(md.Base.metadata.create_all)
         res = await conn.scalar(select(md.User).where(md.User.username == "admin"))
         if res is None:
