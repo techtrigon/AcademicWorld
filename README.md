@@ -13,7 +13,7 @@ Empowered Admins with CRUD operations on all academic details, leveraging Depend
 
 **SETUP**
 
-1- Install PgAdmin (Postgresql)
+1- Install PgAdmin (Postgresql)        &       pip install -r requirements.txt
 
 2- Go to db_connection.py and setup the database connection for configuration ⬇️
 
