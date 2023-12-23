@@ -18,6 +18,7 @@ Empowered Admins with CRUD operations on all academic details, leveraging Depend
 2- Go to db_connection.py and setup the database connection for configuration ⬇️
 
 ////CHANGE BASED ON UR SETUP
+
 server_name = "postgres"
 server_password = "1"
 host_address = "localhost"
