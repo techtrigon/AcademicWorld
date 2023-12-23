@@ -8,12 +8,20 @@ from litestar.datastructures import State
 from passlib.hash import pbkdf2_sha256 as securepwd
 
 
-# -------------------------------------------------------------------------->    DB
+# // DATABASE CONFIGURATION
+server_name = "postgres"
+server_password = "1"
+host_address = "localhost"
+port = "5432"
+database_name = "academicworld"
+
+
+# // DATABASE SETUP
 @asynccontextmanager
 async def db_connection(app: Litestar) -> Any:
     engine = create_async_engine(
-        "postgresql+asyncpg://postgres:1@localhost:5432/main4?prepared_statement_cache_size=500",
-        # echo=True,
+        f"postgresql+asyncpg://{server_name}:{server_password}@{host_address}:{port}/{database_name}?prepared_statement_cache_size=500",
+        echo=True,
     )
     app.state.engine = engine
     async with engine.begin() as conn:
@@ -36,7 +44,7 @@ async def db_connection(app: Litestar) -> Any:
         await engine.dispose()
 
 
-# async def provide_transaction(state: State) -> AsyncGenerator[AsyncSession, None]:
+# // DATABASE SESSIONMAKER
 async def provide_transaction(state: State) -> Any:
     async with async_sessionmaker(state.engine, expire_on_commit=False)() as session:
         async with session.begin():
