@@ -20,7 +20,7 @@ database_name = "academicworld"
 @asynccontextmanager
 async def db_connection(app: Litestar) -> Any:
     engine = create_async_engine(
-        f"postgresql+asyncpg://{server_name}:{server_password}@{host_address}:{port}/{database_name}?prepared_statement_cache_size=500",
+        f"postgresql+asyncpg://{server_name}:{server_password}@{host_address}:{port}/{database_name}?prepared_statement_cache_size=2048",
         echo=True,
     )
     app.state.engine = engine
