@@ -32,3 +32,7 @@ uvicorn.run(app="main:app", host="localhost", port=8080, reload=True)
 
 4- Go to localhost:8080/schema/
 
+5- admin account
+    email = admin
+    username = admin
+    password = admin
