@@ -4,7 +4,7 @@ attrs==23.1.0
 Brotli==1.1.0
 cryptography==41.0.5
 Jinja2==3.1.2
-litestar==2.4.4
+litestar==2.7.0
 orjson==3.9.10
 passlib==1.7.4
 pydantic==2.5.2
