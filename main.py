@@ -14,7 +14,7 @@ from litestar import (
     delete,
     Controller,
 )
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, Sequence
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemySerializationPlugin
 from sqlalchemy import desc, select, insert, update
 from litestar.openapi import OpenAPIConfig
@@ -30,11 +30,11 @@ from sqlalchemy.exc import NoResultFound, IntegrityError
 from litestar.config.response_cache import CACHE_FOREVER
 from passlib.hash import pbkdf2_sha256 as securepwd
 from jwt_authentication import jwt_cookie_auth
+from litestar.connection import ASGIConnection
 
 
 # -----------------------------------------------------------------------------> GUARD
-async def check_admin(request: Request, handler: BaseRouteHandler) -> Any:
-    # print(request.user)
+async def check_admin(request: Request, _: BaseRouteHandler) -> Any:
     if not request.user.get("admin"):
         raise NotAuthorizedException("⚠️ NOT ALLOWED")
 
@@ -46,7 +46,7 @@ class usercontroller(Controller):
     path = "/user"
     tags = ["🟡   Users"]
 
-    async def check_user(user_id: str, request: Request) -> str:
+    async def check_user(self, user_id: str, request: Request) -> str:
         # print("ENTERED")
         if request.user["user_id"] and not request.user.get("admin"):
             raise NotAuthorizedException("⚠️ NOT ALLOWED !!")
@@ -57,7 +57,7 @@ class usercontroller(Controller):
     @post("/login", media_type=MediaType.TEXT)
     async def login(
         self, request: Request, data: mv.UserLogin, db: AsyncSession
-    ) -> str:
+    ) -> Any:
         if data.pwd != data.cpwd:
             raise ValidationException("⚠️ Passwords don't match")
         userid = data.emailname
@@ -68,7 +68,7 @@ class usercontroller(Controller):
         res = await db.scalar(stmt)
         if res is None:
             raise NotFoundException("⚠️ NO USER FOUND !!")
-        if not request.user.get("admin") and securepwd.verify(data.pwd, res.pwd):
+        if not securepwd.verify(data.pwd, res.pwd):
             raise ValidationException("⚠️ Incorrect Password !!")
         return jwt_cookie_auth.login(
             response_media_type=MediaType.TEXT,
@@ -80,20 +80,21 @@ class usercontroller(Controller):
         )
 
     @post("/logout", media_type=MediaType.TEXT)
-    async def logout(request: Request) -> str:
+    async def logout(request: Request) -> Any:
+        # print(request.user)
         resp = Response("✅ LOGGED OUT")
         resp.delete_cookie("token")
         return resp
 
     @get("/", guards=[check_admin])
-    async def users(self, db: AsyncSession) -> list[md.User]:
+    async def users(self, request: Request, db: AsyncSession) -> list[md.User]:
+        print("ENTERED ...........................\n")
+        print(request.user)
         res = await db.scalars(select(md.User))
         return res._allrows()
 
     @post("/register", exclude_from_auth=True, media_type=MediaType.TEXT)
-    async def register(
-        self, data: mv.User, db: AsyncSession, request: Request
-    ) -> str | Response:
+    async def register(self, data: mv.User, db: AsyncSession, request: Request) -> Any:
         try:
             validate_email(data.email)
         except PydanticCustomError:
@@ -109,7 +110,7 @@ class usercontroller(Controller):
         try:
             await db.execute(stmt)
         except IntegrityError:
-            raise Response("⚠️ USER ALREADY EXISTS !!", status_code=400)
+            return Response("⚠️ USER ALREADY EXISTS !!", status_code=400)
         return "✅ USER ADDED SUCCESSFULLY !!"
 
     @delete("/delete/{user_id:str}", status_code=200)
@@ -287,7 +288,8 @@ class coursecontroller(Controller):
         request: Request,
         db: AsyncSession,
     ) -> list[md.CourseList]:
-        user_id = request.user.get("user_id")
+        # user_id = request.user.get("user_id")
+        user_id = request.user["user_id"]
         res = await db.scalars(
             select(md.CourseList).where(md.CourseList.user_id == user_id)
         )
@@ -614,7 +616,7 @@ class examcontroller(Controller):
     tags = ["🟢   Exams"]
 
     @get("/", exclude_from_auth=True)
-    async def exams(self, db: AsyncSession) -> list[md.Exam]:
+    async def exams(self, db: AsyncSession) -> Sequence[md.Exam]:
         res = await db.scalars(select(md.Exam))
         ans = res.all()
         return ans
@@ -830,7 +832,7 @@ class academicscontroller(Controller):
     tags = ["🟢   Academics"]
 
     @get("/", exclude_from_auth=True, cache=CACHE_FOREVER)
-    async def academics(self, db: AsyncSession) -> list[md.Academics]:
+    async def academics(self, db: AsyncSession) -> Sequence[md.Academics]:
         res = await db.scalars(select(md.Academics))
         ans = res.all()
         return ans
