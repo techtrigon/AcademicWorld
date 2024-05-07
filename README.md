@@ -11,6 +11,8 @@ Enabled Users to comment and reply, add items to lists, and like top-rated Colle
 Empowered Admins with CRUD operations on all academic details, leveraging Dependency Injection, Middlewares, lazy-loading SQL relationships and Multiple SQL Joins 
 
 
+**[Python 3.11/3.12]**
+
 **SETUP**
 
 1- Install PgAdmin (Postgresql)        &       pip install -r requirements.txt
