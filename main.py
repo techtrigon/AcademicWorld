@@ -83,7 +83,7 @@ class usercontroller(Controller):
         )
 
     @post("/logout", media_type=MediaType.TEXT)
-    async def logout(request: Request) -> Any:
+    async def logout(self, request: Request) -> Any:
         # print(request.user)
         resp = Response("✅ LOGGED OUT")
         resp.delete_cookie("token")
