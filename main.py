@@ -34,8 +34,11 @@ from litestar.connection import ASGIConnection
 
 
 # -----------------------------------------------------------------------------> GUARD
-async def check_admin(request: Request, _: BaseRouteHandler) -> Any:
-    if not request.user.get("admin"):
+# async def check_admin(request: Request, _: BaseRouteHandler) -> Any:
+async def check_admin(connection: ASGIConnection, _: BaseRouteHandler) -> Any:
+    print("CHECK  ADMIN ............................\n\n\n")
+    # print(connection.user)
+    if not connection.user.get("admin"):
         raise NotAuthorizedException("⚠️ NOT ALLOWED")
 
 
