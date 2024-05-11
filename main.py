@@ -16,7 +16,7 @@ from litestar import (
 )
 from typing import Annotated, Any, Optional, Sequence
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemySerializationPlugin
-from sqlalchemy import desc, select, insert, update
+from sqlalchemy import desc, select, insert, update, delete as sqdl
 from litestar.openapi import OpenAPIConfig
 from litestar.params import Parameter, Body
 from litestar.exceptions import (
@@ -27,14 +27,12 @@ from litestar.exceptions import (
 from litestar.handlers import BaseRouteHandler
 from litestar.di import Provide
 from sqlalchemy.exc import NoResultFound, IntegrityError
-from litestar.config.response_cache import CACHE_FOREVER
 from passlib.hash import pbkdf2_sha256 as securepwd
 from jwt_authentication import jwt_cookie_auth
 from litestar.connection import ASGIConnection
 
 
 # -----------------------------------------------------------------------------> GUARD
-# async def check_admin(request: Request, _: BaseRouteHandler) -> Any:
 async def check_admin(connection: ASGIConnection, _: BaseRouteHandler) -> Any:
     print("CHECK  ADMIN ............................\n\n\n")
     # print(connection.user)
@@ -91,8 +89,8 @@ class usercontroller(Controller):
 
     @get("/", guards=[check_admin])
     async def users(self, request: Request, db: AsyncSession) -> list[md.User]:
-        print("ENTERED ...........................\n")
-        print(request.user)
+        # print("ENTERED ...........................\n")
+        # print(request.user)
         res = await db.scalars(select(md.User))
         return res._allrows()
 
@@ -239,24 +237,21 @@ class coursecontroller(Controller):
     ) -> mv.Post:
         user_id = request.user.get("user_id")
         if coursepost_id is not None:
-            db.add(
-                md.CoursePost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    coursepost_id=coursepost_id,
-                    course_id=course_id,
-                )
+            stmt = insert(md.CoursePost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                coursepost_id=coursepost_id,
+                course_id=course_id,
             )
         else:
-            db.add(
-                md.CoursePost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    course_id=course_id,
-                )
+            stmt = insert(md.CoursePost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                course_id=course_id,
             )
+        await db.scalar(stmt)
         return data
 
     @delete("/post/{post_id:int}/delete", status_code=201)
@@ -332,10 +327,8 @@ class coursecontroller(Controller):
         except NoResultFound:
             return Response("⚠️ NO COURSE FOUND !!", status_code=404)
         user_id = request.user.get("user_id")
-        stmt = (
-            select(md.CourseList)
-            .where(md.CourseList.course_id == course_id)
-            .and_(md.CourseList.user_id == user_id)
+        stmt = select(md.CourseList).where(
+            (md.CourseList.course_id == course_id) & (md.CourseList.user_id == user_id)
         )
         res = await db.scalar(stmt)
         if res is None:
@@ -367,7 +360,7 @@ class coursecontroller(Controller):
         await db.execute(stmt)
         return f"✅ LIKED COURSE {course_id}"
 
-    @get("/likes/ranking", exclude_from_auth=True, cache=600)
+    @get("/likes/ranking", exclude_from_auth=True, cache=20)
     async def likes_ranking(self, db: AsyncSession) -> list[md.Course]:
         stmt = select(md.Course).order_by(desc(md.Course.likes))
         res = await db.scalars(stmt)
@@ -390,7 +383,7 @@ class collegecontroller(Controller):
     async def college_add(
         self,
         db: AsyncSession,
-        data: mv.College = Body(title="College", default=1, examples=[1]),
+        data: mv.College = Body(title="College", default=1),
     ) -> Any:
         try:
             data.rank = int(data.rank)
@@ -478,24 +471,21 @@ class collegecontroller(Controller):
     ) -> mv.Post:
         user_id = request.user.get("user_id")
         if collegepost_id is not None:
-            db.add(
-                md.CollegePost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    collegepost_id=collegepost_id,
-                    college_id=college_id,
-                )
+            stmt = insert(md.CollegePost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                college_id=college_id,
+                collegepost_id=collegepost_id,
             )
         else:
-            db.add(
-                md.CollegePost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    college_id=college_id,
-                )
+            stmt = insert(md.CollegePost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                college_id=college_id,
             )
+        await db.scalar(stmt)
         return data
 
     @delete("/post/{post_id:int}/delete", status_code=201, media_type=MediaType.TEXT)
@@ -569,10 +559,9 @@ class collegecontroller(Controller):
         except NoResultFound:
             raise NotFoundException("⚠️ NO COLLEGE FOUND !!")
         user_id = request.user.get("user_id")
-        stmt = (
-            select(md.CollegeList)
-            .where(md.CollegeList.college_id == college_id)
-            .and_(md.CollegeList.user_id == user_id)
+        stmt = select(md.CollegeList).where(
+            (md.CollegeList.college_id == college_id)
+            & (md.CollegeList.user_id == user_id)
         )
         res = await db.scalar(stmt)
         if res is None:
@@ -604,7 +593,7 @@ class collegecontroller(Controller):
         await db.execute(stmt)
         return f"✅ LIKED COLLEGE {college_id}"
 
-    @get("/likes/ranking", exclude_from_auth=True, cache=600)
+    @get("/likes/ranking", exclude_from_auth=True, cache=20)
     async def likes_ranking(self, db: AsyncSession) -> list[md.College]:
         stmt = select(md.College).order_by(desc(md.College.likes))
         res = await db.scalars(stmt)
@@ -697,25 +686,22 @@ class examcontroller(Controller):
         exam_id: int = Parameter(description="ID of Exam to comment on"),
     ) -> mv.Post:
         user_id = request.user.get("user_id")
-        if exam_id is not None:
-            db.add(
-                md.ExamPost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    exampost_id=exampost_id,
-                    exam_id=exam_id,
-                )
+        if exampost_id is not None:
+            stmt = insert(md.ExamPost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                exampost_id=exampost_id,
+                exam_id=exam_id,
             )
         else:
-            db.add(
-                md.ExamPost(
-                    title=data.title,
-                    body=data.body,
-                    user_id=user_id,
-                    exam_id=exam_id,
-                )
+            stmt = insert(md.ExamPost).values(
+                title=data.title,
+                body=data.body,
+                user_id=user_id,
+                exam_id=exam_id,
             )
+        await db.scalar(stmt)
         return data
 
     @delete("/post/{post_id:int}/delete", status_code=201, media_type=MediaType.TEXT)
@@ -787,10 +773,8 @@ class examcontroller(Controller):
         except NoResultFound:
             raise NotFoundException("⚠️ NO EXAM FOUND !!")
         user_id = request.user.get("user_id")
-        stmt = (
-            select(md.ExamList)
-            .where(md.ExamList.exam_id == exam_id)
-            .and_(md.ExamList.user_id == user_id)
+        stmt = select(md.ExamList).where(
+            (md.ExamList.exam_id == exam_id) & (md.ExamList.user_id == user_id)
         )
         res = await db.scalar(stmt)
         if res is None:
@@ -820,7 +804,7 @@ class examcontroller(Controller):
         await db.execute(stmt)
         return f"✅ LIKED EXAM {exam_id}"
 
-    @get("/likes/ranking", exclude_from_auth=True, cache=600)
+    @get("/likes/ranking", exclude_from_auth=True, cache=20)
     async def likes_ranking(self, db: AsyncSession) -> list[md.Exam]:
         stmt = select(md.Exam).order_by(desc(md.Exam.likes))
         res = await db.scalars(stmt)
@@ -834,7 +818,7 @@ class academicscontroller(Controller):
     path = "/academics"
     tags = ["🟢   Academics"]
 
-    @get("/", exclude_from_auth=True, cache=CACHE_FOREVER)
+    @get("/", exclude_from_auth=True)
     async def academics(self, db: AsyncSession) -> Sequence[md.Academics]:
         res = await db.scalars(select(md.Academics))
         ans = res.all()
@@ -843,14 +827,14 @@ class academicscontroller(Controller):
     @post("/add", guards=[check_admin], media_type=MediaType.TEXT)
     async def add(self, data: mv.Academics, db: AsyncSession) -> str | Response:
         stmt = insert(md.Academics).values(
-            course_fee=data.course_fee,
-            cutoff_rank=data.cutoff_rank,
             course_id=data.course_id,
             college_id=data.college_id,
             exam_id=data.exam_id,
+            course_fee=data.course_fee,
+            cutoff_rank=data.cutoff_rank,
         )
         try:
-            await db.scalar(stmt)
+            await db.execute(stmt)
         except Exception:
             return Response("⚠️ ACADEMICS ALREADY EXISTS !!", status_code=400)
         return "✅ ADDED SUCCESSFULLY !!"
@@ -861,10 +845,11 @@ class academicscontroller(Controller):
         res = await db.scalar(stmt)
         if res is None:
             raise NotFoundException("⚠️ NO ACADEMICS FOUND !!")
-        await db.delete(res)
+        else:
+            await db.delete(res)
         return "✅ DELETED SUCCESSFULLY !!"
 
-    @get("/colleges-from-course", exclude_from_auth=True, cache=CACHE_FOREVER)
+    @get("/colleges-from-course", exclude_from_auth=True, cache=20)
     async def CollegesFromCourse(
         self,
         db: AsyncSession,
@@ -892,12 +877,12 @@ class academicscontroller(Controller):
         ans = res._allrows()
         return ans
 
-    @get("/academics-from-exam", exclude_from_auth=True, cache=CACHE_FOREVER)
+    @get("/academics-from-exam", exclude_from_auth=True, cache=20)
     async def AcademicsFromExam(
         self,
         db: AsyncSession,
         exam_id: int = Parameter(
-            description="Get all College & Courses accepting this Exam"
+            description="All College & Courses accepting this Exam"
         ),
     ) -> list[dict]:
         stmt = (
@@ -918,6 +903,38 @@ class academicscontroller(Controller):
                 & (md.Academics.exam_id == exam_id),
             )
         )
+        res = await db.execute(stmt)
+        ans = res.mappings()
+        ans = [dict(i) for i in ans]
+        return ans
+
+    @get("/fees-from-course", exclude_from_auth=True, cache=20)
+    async def FeesCourseCollege(
+        self,
+        db: AsyncSession,
+        course_id: int = Parameter(
+            description="All Colleges accepting the course (ASC sorted by fees)"
+        ),
+    ) -> list[Any]:
+        # stmt = (
+        #     select(
+        #         md.College.name.label("College"), md.Academics.course_fee.label("Fee")
+        #     )
+        #     .where(md.Academics.course_id == course_id)
+        #     .join(md.College, md.Academics.college_id == md.College.id)
+        #     .order_by(md.Academics.course_fee)
+        # )
+        subq = (
+            select(md.Academics.college_id, md.Academics.course_fee)
+            .where(md.Academics.course_id == course_id)
+            .alias()
+        )
+        stmt = (
+            select(md.College.name.label("College"), subq.c.course_fee.label("Fee"))
+            .join(subq, md.College.id == subq.c.college_id)
+            .order_by(subq.c.course_fee)
+        )
+
         res = await db.execute(stmt)
         ans = res.mappings()
         ans = [dict(i) for i in ans]
@@ -965,4 +982,4 @@ app = Litestar(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app="main:app", host="localhost", port=8080, reload=True)
+    uvicorn.run("main:app", host="localhost", port=8080, reload=True)

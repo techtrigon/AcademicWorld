@@ -17,10 +17,10 @@ database_name = "academicworld"
 
 
 # // DATABASE SETUP
-@asynccontextmanager
+@asynccontextmanager  # type: ignore
 async def db_connection(app: Litestar) -> Any:
     engine = create_async_engine(
-        f"postgresql+asyncpg://{server_name}:{server_password}@{host_address}:{port}/{database_name}?prepared_statement_cache_size=2048",
+        f"postgresql+asyncpg://{server_name}:{server_password}@{host_address}:{port}/{database_name}?prepared_statement_cache_size=500",
         echo=True,
     )
     app.state.engine = engine
